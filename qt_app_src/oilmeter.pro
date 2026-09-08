@@ -19,6 +19,7 @@ SOURCES += \
     ui/mainwindow.cpp \
     ui/monitorpage.cpp \
     ui/historypage.cpp \
+    ui/settingspage.cpp \
     ui/trendwidget.cpp
 
 HEADERS += \
@@ -33,6 +34,7 @@ HEADERS += \
     ui/mainwindow.h \
     ui/monitorpage.h \
     ui/historypage.h \
+    ui/settingspage.h \
     ui/trendwidget.h
 
 INCLUDEPATH += app comms protocol storage ui
