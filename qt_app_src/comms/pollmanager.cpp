@@ -38,21 +38,6 @@ void PollManager::writeThreshold(uint8_t addr, uint16_t oi, float value)
     pendingWrites_.append(WriteCmd{ addr, oi, value });
 }
 
-const MeterSnapshot& PollManager::lastSnapshot(uint8_t addr) const
-{
-    for (int i = 0; i < addrs_.size(); ++i)
-        if (addrs_[i] == addr) return snaps_[i];
-    static MeterSnapshot empty;
-    return empty;
-}
-
-PollManager::State PollManager::stateOf(uint8_t addr) const
-{
-    for (int i = 0; i < addrs_.size(); ++i)
-        if (addrs_[i] == addr) return states_[i];
-    return ST_UNKNOWN;
-}
-
 void PollManager::start()
 {
     if (running_) return;
