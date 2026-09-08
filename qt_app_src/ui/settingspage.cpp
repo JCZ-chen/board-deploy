@@ -49,12 +49,11 @@ void SettingsPage::setAddresses(const QVector<uint8_t>& addrs)
 
 void SettingsPage::send(uint16_t oi, QLineEdit* edit)
 {
-    if (!writeFn_) return;
     bool ok = false;
     float v = edit->text().toFloat(&ok);
     if (!ok) { resultLabel_->setText("阈值格式错误(需数字)"); return; }
     uint8_t addr = addrCombo_->currentData().toUInt();
-    writeFn_(addr, oi, v);
+    emit writeRequested(addr, oi, v);   // queued -> PollManager(工作线程)
     resultLabel_->setText(QString("已发送写入: 从机 %1, %2=%3")
                           .arg(addr).arg(oi == 0x2506 ? "超高" : "超低").arg(v));
 }

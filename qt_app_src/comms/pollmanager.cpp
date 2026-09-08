@@ -3,26 +3,17 @@
 #include <QCoreApplication>
 #include <cstring>
 
-PollManager::PollManager()
+PollManager::PollManager(QObject* parent) : QObject(parent)
 {
-    timer_ = new QTimer(nullptr);
+    timer_ = new QTimer(this);
     timer_->setSingleShot(false);
-    QObject::connect(timer_, &QTimer::timeout, [this]{ tick(); });
+    connect(timer_, &QTimer::timeout, this, &PollManager::tick);
 }
 
 PollManager::~PollManager()
 {
     stop();
-    delete timer_;
-}
-
-void PollManager::setCallbacks(DataCallback data, LogCallback log,
-                               WriteCb wcb, StateCb scb)
-{
-    datacb_ = data;
-    logcb_ = log;
-    writecb_ = wcb;
-    statecb_ = scb;
+    // timer_ 是子对象, 随对象销毁
 }
 
 void PollManager::setDevice(const QString& dev, int baud) { dev_ = dev; baud_ = baud; }
@@ -43,6 +34,7 @@ void PollManager::setPollPeriodMs(int ms) { periodMs_ = ms; }
 
 void PollManager::writeThreshold(uint8_t addr, uint16_t oi, float value)
 {
+    // 作为槽被 UI 经 queued 信号调用, 在工作线程执行 —— 线程安全
     pendingWrites_.append(WriteCmd{ addr, oi, value });
 }
 
@@ -125,7 +117,7 @@ void PollManager::pollOne(uint8_t addr)
         failCount_[idx]++;
         if (states_[idx] != ST_OFFLINE && failCount_[idx] >= 3) {
             states_[idx] = ST_OFFLINE;
-            if (statecb_) statecb_(addr, (int)ST_OFFLINE);
+            emit stateChanged(addr, (int)ST_OFFLINE);
             log(QString("从机 %1 离线").arg(addr));
         }
         return;
@@ -144,10 +136,10 @@ void PollManager::pollOne(uint8_t addr)
     failCount_[idx] = 0;
     if (states_[idx] != ST_ONLINE) {
         states_[idx] = ST_ONLINE;
-        if (statecb_) statecb_(addr, (int)ST_ONLINE);
+        emit stateChanged(addr, (int)ST_ONLINE);
         log(QString("从机 %1 上线").arg(addr));
     }
-    if (datacb_) datacb_(snap);
+    emit dataReady(snap);
 }
 
 void PollManager::doWrites()
@@ -157,16 +149,16 @@ void PollManager::doWrites()
         mb66::Tlv t = mb66::makeFloatTlv(wc.val);
         std::vector<uint8_t> req = mb66::buildWriteRequest(wc.addr, wc.oi, t);
         mb66::ParsedFrame resp;
-        if (!transact(sp_, req, resp, 200)) { if (writecb_) writecb_(wc.addr, wc.oi, false, "写超时/无应答"); continue; }
-        if (resp.isError()) { if (writecb_) writecb_(wc.addr, wc.oi, false, QString("写失败, 异常码 %1").arg(resp.errorCode)); continue; }
-        if ((resp.sfun & 0x3F) != mb66::SFUN_WRITE_RESP) { if (writecb_) writecb_(wc.addr, wc.oi, false, "应答类型异常"); continue; }
+        if (!transact(sp_, req, resp, 200)) { emit writeResult(wc.addr, wc.oi, false, "写超时/无应答"); continue; }
+        if (resp.isError()) { emit writeResult(wc.addr, wc.oi, false, QString("写失败, 异常码 %1").arg(resp.errorCode)); continue; }
+        if ((resp.sfun & 0x3F) != mb66::SFUN_WRITE_RESP) { emit writeResult(wc.addr, wc.oi, false, "应答类型异常"); continue; }
 
         std::vector<uint8_t> rreq = mb66::buildReadRequest(wc.addr, wc.oi);
         mb66::ParsedFrame rr;
-        if (!transact(sp_, rreq, rr, 200)) { if (writecb_) writecb_(wc.addr, wc.oi, false, "回读超时"); continue; }
+        if (!transact(sp_, rreq, rr, 200)) { emit writeResult(wc.addr, wc.oi, false, "回读超时"); continue; }
         float back = decodeFloatResp(rr);
         if (back >= wc.val - 0.01 && back <= wc.val + 0.01) {
-            if (writecb_) writecb_(wc.addr, wc.oi, true, "写入成功");
+            emit writeResult(wc.addr, wc.oi, true, "写入成功");
             for (int i = 0; i < addrs_.size(); ++i)
                 if (addrs_[i] == wc.addr) {
                     if (wc.oi == 0x2506) { snaps_[i].hiThr = back; snaps_[i].hasThr = true; }
@@ -174,7 +166,7 @@ void PollManager::doWrites()
                     break;
                 }
         } else {
-            if (writecb_) writecb_(wc.addr, wc.oi, false, QString("回读不一致: %1").arg(back));
+            emit writeResult(wc.addr, wc.oi, false, QString("回读不一致: %1").arg(back));
         }
     }
     pendingWrites_.clear();
